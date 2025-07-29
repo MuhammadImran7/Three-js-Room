@@ -1,6 +1,6 @@
 <template>
   <div id="app">
-    <h1>Three.js Room</h1>
+    <!-- <h1>Three.js Room</h1> -->
     <!-- Use the ThreeScene component here -->
     <ThreeScene />
   </div>
@@ -20,5 +20,9 @@ export default {
 <style>
 #app {
   text-align: center;
+}
+body{
+  padding: 0 !important;
+  margin: 0 !important;
 }
 </style>

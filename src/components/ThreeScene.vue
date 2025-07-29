@@ -88,7 +88,7 @@ export default {
             // console.log("Walls setup:", walls);
 
             // Lights           
-            const ambientLight = new THREE.AmbientLight(0x404040, 1);
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
             scene.add(ambientLight);
 
             const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
@@ -107,40 +107,18 @@ export default {
             controls.maxPolarAngle = Math.PI / 2;
             controls.minDistance = 300;  // Zoom in limit (room ke andar nahi jayega)
             controls.maxDistance = 500; // Zoom out limit (invisible nahi hoga)
-            
-            // TORCH LIGHT - Follows camera movement
-            const torchLight = new THREE.SpotLight(0xff0000, 5, 100, Math.PI / 6, 0.5, 2);
-            torchLight.position.set(0, 0, 0); // Room center
-            torchLight.target.position.set(0, 1.5, 0); // Points forward initially
-            scene.add(torchLight);
-            scene.add(torchLight.target);
-            // 3. Configure shadows
-            torchLight.castShadow = true;
-            torchLight.shadow.mapSize.width = 1024;
-            torchLight.shadow.mapSize.height = 1024;
-            torchLight.shadow.camera.near = 0.5;
-            torchLight.shadow.camera.far = 100;
-            // console.log(torchLight);
-            // Animation loop with wall visibility
+
+            //animation applied here
             const animate = () => {
                 requestAnimationFrame(animate);
                 const cameraPosition = new THREE.Vector3();
-                
+
                 camera.getWorldPosition(cameraPosition);
-// Update torch light to follow camera
-                torchLight.position.copy(cameraPosition);
-                 // Get camera direction
+
                 const cameraDirection = new THREE.Vector3();
                 camera.getWorldDirection(cameraDirection);
-                // console.log(cameraDirection, cameraPosition)
-                // Set torch target to where camera is looking
-                const torchTarget = new THREE.Vector3()
-                    .copy(cameraPosition)
-                    .add(cameraDirection.multiplyScalar(10)); // 50 units ahead
-                    // console.log(torchTarget);
-                torchLight.target.position.copy(torchTarget);
-                // const cameraPosition = new THREE.Vector3();
-                // camera.getWorldPosition(cameraPosition);
+
+                camera.getWorldPosition(cameraPosition);
 
                 walls.forEach(({ mesh, normal }) => {
                     const wallPosition = new THREE.Vector3();
@@ -158,7 +136,7 @@ export default {
                     // Show wall if camera is behind it or at angle
                     mesh.visible = dot <= 0.1; // Small threshold for better control
                 });
-
+                directionalLight.position.set(cameraPosition.x, cameraPosition.y, cameraPosition.z);
                 controls.update();
                 renderer.render(scene, camera);
             };
@@ -171,7 +149,7 @@ export default {
 
 <style scoped>
 .three-container {
-    width: 100%;
-    height: 100vh;
+    /* width: 100%; */
+    /* height: 90vh; */
 }
 </style>
