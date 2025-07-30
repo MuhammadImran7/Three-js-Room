@@ -30,7 +30,9 @@ export default {
             // console.log(floorGeometry)
             const floorMaterial = new THREE.MeshStandardMaterial({
                 color: 0xffffff,
-                side: THREE.DoubleSide
+                side: THREE.DoubleSide,
+                roughness: 0.5,
+            metalness: 0.2
             });
             // console.log(floorMaterial)
             const floor = new THREE.Mesh(floorGeometry, floorMaterial);
@@ -39,21 +41,29 @@ export default {
             scene.add(floor);
             // console.log(floor.position.x, floor.position.y, floor.position.z )
             // Wall materials
-            const wallMaterial = new THREE.MeshLambertMaterial({
-                color: 0x00FF00,
-                side: THREE.DoubleSide
+            const wallMaterial = new THREE.MeshStandardMaterial({
+                color: 0x00ff00,
+                side: THREE.DoubleSide,
+                roughness: 0.7,
+        metalness: 0.1
             });
-            const wallMaterial1 = new THREE.MeshLambertMaterial({
-                color: 0x0000FF,
-                side: THREE.DoubleSide
+            const wallMaterial1 = new THREE.MeshStandardMaterial({
+                color: 0xff0000,
+                side: THREE.DoubleSide,
+                roughness: 0.7,
+        metalness: 0.1
             });
-            const wallMaterial2 = new THREE.MeshLambertMaterial({
-                color: 0xFF0000,
-                side: THREE.DoubleSide
+            const wallMaterial2 = new THREE.MeshStandardMaterial({
+                color: 0x00ff00,
+                side: THREE.DoubleSide,
+                roughness: 0.7,
+        metalness: 0.1
             });
-            const wallMaterial3 = new THREE.MeshLambertMaterial({
-                color: 0xFFFF00,
-                side: THREE.DoubleSide
+            const wallMaterial3 = new THREE.MeshStandardMaterial({
+                color: 0xff0000,
+                side: THREE.DoubleSide,
+                roughness: 0.7,
+        metalness: 0.1
             });
             // console.log(wallMaterial, wallMaterial, wallMaterial2, wallMaterial3)
             // Create walls
@@ -84,18 +94,45 @@ export default {
                 { mesh: wall3, normal: new THREE.Vector3(1, 0, 0) },     // Left wall normal points right
                 { mesh: wall4, normal: new THREE.Vector3(0, 0, -1) }     // Front wall normal points backward
             ];
-
+            // floor.receiveShadow = true;
+            // wall1.receiveShadow = true;
+            // wall2.receiveShadow = true;
+            // wall3.receiveShadow = true;
+            // wall4.receiveShadow = true;
             // console.log("Walls setup:", walls);
 
             // Lights           
-            const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
             scene.add(ambientLight);
 
-            const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
-            directionalLight.position.set(50, 100, 50);
-            scene.add(directionalLight);
+            // const pointLight = new THREE.PointLight(
+            //     0xffffee,  // Warm white color
+            //     1.5,       // Increased intensity
+            //     300,       // Larger distance to cover whole room
+            //     2          // Decay factor for more natural falloff
+            // );
 
-            // Camera position (start INSIDE the room)
+            const fillLight = new THREE.DirectionalLight(0xffffff, 1);
+             fillLight.position.set(0, 1, 0);
+            scene.add(fillLight);
+
+//             const hemisphereLight = new THREE.HemisphereLight(
+//     0xffffff, // sky color
+//     0x404040, // ground color
+//     0.2 // intensity
+// );
+// hemisphereLight.position.set(0, 50, 0);
+// scene.add(hemisphereLight);
+            // pointLight.position.set(0, 80, 0);
+            // scene.add(pointLight);
+            // renderer.shadowMap.enabled = true;
+            // renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+            // pointLight.castShadow = true;
+            // pointLight.shadow.mapSize.width = 1024;
+            // pointLight.shadow.mapSize.height = 1024;
+            // pointLight.shadow.camera.near = 0.5;
+            // pointLight.shadow.camera.far = 400;
             camera.position.set(0, 0, 0); // Inside room center
             camera.lookAt(new THREE.Vector3(0, 30, -50)); // Look towards back wall
 
@@ -136,7 +173,7 @@ export default {
                     // Show wall if camera is behind it or at angle
                     mesh.visible = dot <= 0.1; // Small threshold for better control
                 });
-                directionalLight.position.set(cameraPosition.x, cameraPosition.y, cameraPosition.z);
+                fillLight.position.set(cameraPosition.x, 100, cameraPosition.z);
                 controls.update();
                 renderer.render(scene, camera);
             };
@@ -149,7 +186,7 @@ export default {
 
 <style scoped>
 .three-container {
-    /* width: 100%; */
-    /* height: 90vh; */
+    padding: 0;
+    margin: 0;
 }
 </style>
