@@ -25,7 +25,7 @@ export default {
             // Floor
             const floorGeometry = new THREE.PlaneGeometry(200, 200);
             const floorMaterial = new THREE.MeshStandardMaterial({
-                color: 0xffffff,
+                color: 0x87CEEB,
                 side: THREE.DoubleSide,
                 roughness: 0.5,
                 metalness: 0.2
@@ -44,14 +44,14 @@ export default {
             
             const wall1 = new THREE.Mesh(
                 new THREE.BoxGeometry(200, 100, 4), 
-                new THREE.MeshStandardMaterial({ color: 0x00ff00, ...wallMaterialSettings })
+                new THREE.MeshStandardMaterial({ color: 0xffffff, ...wallMaterialSettings })
             );
             wall1.position.set(0, 50, -100);
             scene.add(wall1);
 
             const wall2 = new THREE.Mesh(
                 new THREE.BoxGeometry(200, 100, 4), 
-                new THREE.MeshStandardMaterial({ color: 0xff0000, ...wallMaterialSettings })
+                new THREE.MeshStandardMaterial({ color: 0xffffff, ...wallMaterialSettings })
             );
             wall2.rotation.y = Math.PI / 2;
             wall2.position.set(100, 50, 0);
@@ -59,7 +59,7 @@ export default {
 
             const wall3 = new THREE.Mesh(
                 new THREE.BoxGeometry(200, 100, 4), 
-                new THREE.MeshStandardMaterial({ color: 0x00ff00, ...wallMaterialSettings })
+                new THREE.MeshStandardMaterial({ color: 0xffffff, ...wallMaterialSettings })
             );
             wall3.rotation.y = Math.PI / 2;
             wall3.position.set(-100, 50, 0);
@@ -67,7 +67,7 @@ export default {
 
             const wall4 = new THREE.Mesh(
                 new THREE.BoxGeometry(200, 100, 4), 
-                new THREE.MeshStandardMaterial({ color: 0xff0000, ...wallMaterialSettings })
+                new THREE.MeshStandardMaterial({ color: 0xffffff, ...wallMaterialSettings })
             );
             wall4.position.set(0, 50, 100);
             scene.add(wall4);
@@ -80,11 +80,11 @@ export default {
             ];
 
             // Lighting
-            const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
             scene.add(ambientLight);
 
             const fillLight = new THREE.DirectionalLight(0xffffff, 1);
-            fillLight.position.set(0, 100, 0);
+            fillLight.position.set(20, 100, 20);
             scene.add(fillLight);
 
             // Camera
@@ -115,7 +115,7 @@ export default {
                     const scaleX = targetSize.x / currentSize.x;
                     const scaleY = targetSize.y / currentSize.y;
                     const scaleZ = targetSize.z / currentSize.z;
-                    
+                     
                     // Use uniform scaling (smallest scale to maintain proportions)
                     const uniformScale = Math.min(scaleX, scaleY, scaleZ);
                     
@@ -193,11 +193,11 @@ export default {
             // );
 
             // // Toilet - should be around 40x70x60 units
-            // loadModel('models/toilet.glb', 
-            //     { x: 50, y: 0, z: 50 }, 
-            //     { x: 40, y: 70, z: 60 }, 
-            //     { x: 0, y: Math.PI / 2, z: 0 }
-            // );
+            loadModel('models/toilet.glb', 
+                { x: -50, y: 10, z: -60 }, 
+                { x: 40, y: 70, z: 60 }, 
+                { x: 0, y: Math.PI / 70, z: 0 } 
+            );
 
             // Helper function to create debug wireframes (optional)
             // const createDebugWireframe = (position, size, color = 0xff0000) => {
@@ -216,7 +216,7 @@ export default {
             const animate = () => {
                 requestAnimationFrame(animate);
                 const cameraPosition = new THREE.Vector3();
-                camera.getWorldPosition(cameraPosition);
+                camera.getWorldPosition(cameraPosition);  
 
                 const cameraDirection = new THREE.Vector3();
                 camera.getWorldDirection(cameraDirection);
