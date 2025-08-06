@@ -9,6 +9,22 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 
 export default {
     name: 'ThreeScene',
+    data() {
+        return {
+            draggableObjects: [],
+            isDragging: false,
+            dragObject: null,
+            mouse: new THREE.Vector2(),
+            raycaster: new THREE.Raycaster(),
+            dragPlane: new THREE.Plane(),
+            dragOffset: new THREE.Vector3(),
+            roomBounds: {
+                minX: -95, maxX: 95,
+                minZ: -95, maxZ: 95,
+                minY: 50, maxY: 100
+            }
+        }
+    },
     mounted() {
         this.initThreeJS();
     },
@@ -22,6 +38,11 @@ export default {
             this.$refs.threeContainer.appendChild(renderer.domElement);
             scene.background = new THREE.Color(0xeeeeee);
 
+            // Store references for drag functionality
+            this.scene = scene;
+            this.camera = camera;
+            this.renderer = renderer;
+
             // Floor
             const floorGeometry = new THREE.PlaneGeometry(200, 200);
             const floorMaterial = new THREE.MeshStandardMaterial({
@@ -33,6 +54,7 @@ export default {
             const floor = new THREE.Mesh(floorGeometry, floorMaterial);
             floor.rotation.x = -Math.PI / 2;
             floor.position.set(0, 0, 0);
+            floor.name = 'floor'; // Name it so we can identify it
             scene.add(floor);
 
             // Walls
@@ -47,6 +69,7 @@ export default {
                 new THREE.MeshStandardMaterial({ color: 0xffffff, ...wallMaterialSettings })
             );
             wall1.position.set(0, 50, -100);
+            wall1.name = 'wall';
             scene.add(wall1);
 
             const wall2 = new THREE.Mesh(
@@ -55,6 +78,7 @@ export default {
             );
             wall2.rotation.y = Math.PI / 2;
             wall2.position.set(100, 50, 0);
+            wall2.name = 'wall';
             scene.add(wall2);
 
             const wall3 = new THREE.Mesh(
@@ -63,6 +87,7 @@ export default {
             );
             wall3.rotation.y = Math.PI / 2;
             wall3.position.set(-100, 50, 0);
+            wall3.name = 'wall';
             scene.add(wall3);
 
             const wall4 = new THREE.Mesh(
@@ -70,6 +95,7 @@ export default {
                 new THREE.MeshStandardMaterial({ color: 0xffffff, ...wallMaterialSettings })
             );
             wall4.position.set(0, 50, 100);
+            wall4.name = 'wall';
             scene.add(wall4);
 
             const walls = [
@@ -79,6 +105,8 @@ export default {
                 { mesh: wall4, normal: new THREE.Vector3(0, 0, -1) }     // Front wall
             ];
 
+            this.walls = walls;
+
             // Lighting
             const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
             scene.add(ambientLight);
@@ -86,9 +114,10 @@ export default {
             const fillLight = new THREE.DirectionalLight(0xffffff, 1);
             fillLight.position.set(20, 100, 20);
             scene.add(fillLight);
+            this.fillLight = fillLight;
 
             // Camera
-            camera.position.set(0, 100, 200);
+            camera.position.set(0, 100, 100);
             camera.lookAt(0, 50, 0);
 
             // Controls
@@ -99,11 +128,12 @@ export default {
             controls.maxPolarAngle = Math.PI/2;
             controls.minDistance = 260;
             controls.maxDistance = 500;
+            this.controls = controls;
 
             // Model Loading with automatic scaling
             const gltfLoader = new GLTFLoader();
             
-            const loadModel = (path, position, targetSize, rotation, callback) => {
+            const loadModel = (path, position, targetSize, rotation, name, callback) => {
                 gltfLoader.load(path, (gltf) => {
                     const model = gltf.scene;
                     
@@ -129,14 +159,23 @@ export default {
                     model.position.sub(center);
                     model.position.add(new THREE.Vector3(position.x, position.y, position.z));
                     
+                    // Set name and make draggable
+                    model.name = name;
+                    model.userData.isDraggable = true;
+                    model.userData.originalPosition = model.position.clone();
+                    
                     model.traverse((child) => {
                         if (child.isMesh) {
                             child.castShadow = true;
                             child.receiveShadow = true;
+                            child.userData.parent = model; // Reference to parent model
                         }
                     });
                     
                     scene.add(model);
+                    
+                    // Add to draggable objects
+                    this.draggableObjects.push(model);
                     
                     if (callback) callback(model);
                     
@@ -147,81 +186,51 @@ export default {
                 }, undefined, (error) => {
                     console.error('Error loading model:', error);
                 });
-            };
+            };  
 
-            // Load models with proper target sizes (in scene units)
-            // Bathtub - should be around 150x70x50 units
+            // Load draggable models
             loadModel('models/bath.glb', 
                 { x: 50, y: 25, z: -70 }, 
                 { x: 150, y: 50, z: 70 }, 
-                { x: 0, y: 0, z: 0 }
+                { x: 0, y: 0, z: 0 },
+                'bath'
             );
 
-            // Door - should be around 80x200x5 units  
             loadModel('models/door.glb', 
                 { x: 80, y: 37, z: 98 }, 
                 { x: 5, y: 200, z: 100 }, 
-                { x: 0, y: Math.PI / 2, z: 0 }
+                { x: 0, y: Math.PI / 2, z: 0 },
+                'door'
             );
 
-            // Mirror - should be around 60x80x5 units
             loadModel('models/mirror.glb', 
                 { x: -100, y: 60, z: 0 }, 
                 { x: -60, y: 80, z: 45 }, 
-                { x: 0, y: Math.PI/2, z: 0 }
+                { x: 0, y: Math.PI/2, z: 0 },
+                'mirror'
             );
 
-            // // Radiator - should be around 100x60x15 units
-            // loadModel('models/radiator.glb', 
-            //     { x: 0, y: 15, z: 95 }, 
-            //     { x: 100, y: 60, z: 15 }, 
-            //     { x: 0, y: 0, z: 0 }
-            // );
-
-            // // Shower - should be around 80x200x80 units
-            // loadModel('models/shower.glb', 
-            //     { x: 70, y: 0, z: -70 }, 
-            //     { x: 80, y: 200, z: 80 }, 
-            //     { x: 0, y: Math.PI / 4, z: 0 }
-            // );
-
-            // // Sink - should be around 60x40x50 units
-            // loadModel('models/sink.glb', 
-            //     { x: -70, y: 40, z: 50 }, 
-            //     { x: 60, y: 40, z: 50 }, 
-            //     { x: 0, y: Math.PI / 2, z: 0 }
-            // );
-
-            // // Toilet - should be around 40x70x60 units
             loadModel('models/toilet.glb', 
                 { x: -50, y: 10, z: -60 }, 
                 { x: 40, y: 70, z: 60 }, 
-                { x: 0, y: Math.PI / 70, z: 0 } 
+                { x: 0, y: Math.PI / 70, z: 0 },
+                'toilet'
             );
 
-            // Helper function to create debug wireframes (optional)
-            // const createDebugWireframe = (position, size, color = 0xff0000) => {
-            //     const geometry = new THREE.BoxGeometry(size.x, size.y, size.z);
-            //     const edges = new THREE.EdgesGeometry(geometry);
-            //     const line = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color }));
-            //     line.position.set(position.x, position.y, position.z);
-            //     // scene.add(line); // Uncomment to show debug wireframes
-            // };
-
-            // Add debug wireframes for reference (uncomment to see)
-            // createDebugWireframe({ x: 0, y: 25, z: -50 }, { x: 150, y: 50, z: 70 }, 0x00ff00); // Bath
-            // createDebugWireframe({ x: 100, y: 100, z: 0 }, { x: 5, y: 200, z: 80 }, 0xff0000); // Door
+            // Add mouse event listeners for dragging
+            this.addDragListeners();
 
             // Animation
             const animate = () => {
                 requestAnimationFrame(animate);
+                
                 const cameraPosition = new THREE.Vector3();
                 camera.getWorldPosition(cameraPosition);  
 
                 const cameraDirection = new THREE.Vector3();
                 camera.getWorldDirection(cameraDirection);
 
-                walls.forEach(({ mesh, normal }) => {
+                this.walls.forEach(({ mesh, normal }) => {
                     const wallPosition = new THREE.Vector3();
                     mesh.getWorldPosition(wallPosition);
 
@@ -236,9 +245,13 @@ export default {
                     mesh.visible = dot <= 0.1; // Small threshold for better control
                 });
                 
-                fillLight.position.copy(camera.position);
-                fillLight.position.y += 50; // Keep light above camera
-                controls.update();
+                this.fillLight.position.copy(camera.position);
+                this.fillLight.position.y += 50; // Keep light above camera
+                
+                if (!this.isDragging) {
+                    this.controls.update();
+                }
+                
                 renderer.render(scene, camera);
             };
 
@@ -250,6 +263,133 @@ export default {
                 camera.updateProjectionMatrix();
                 renderer.setSize(window.innerWidth, window.innerHeight);
             });
+        },
+
+        addDragListeners() {
+            const container = this.renderer.domElement;
+            
+            // Mouse down event
+            container.addEventListener('mousedown', (event) => {
+                event.preventDefault();
+                this.onMouseDown(event);
+            });
+
+            // Mouse move event
+            container.addEventListener('mousemove', (event) => {
+                event.preventDefault();
+                this.onMouseMove(event);
+            });
+
+            // Mouse up event
+            container.addEventListener('mouseup', (event) => {
+                event.preventDefault();
+                this.onMouseUp(event);
+            });
+
+            // Prevent context menu
+            container.addEventListener('contextmenu', (event) => {
+                event.preventDefault();
+            });
+        },
+
+        onMouseDown(event) {
+            this.updateMousePosition(event);
+            
+            // Cast ray from camera through mouse position
+            this.raycaster.setFromCamera(this.mouse, this.camera);
+            
+            // Check for intersections with draggable objects
+            const intersects = this.raycaster.intersectObjects(this.draggableObjects, true);
+            
+            if (intersects.length > 0) {
+                // Find the parent draggable object
+                let targetObject = intersects[0].object;
+                while (targetObject.parent && !targetObject.userData.isDraggable) {
+                    targetObject = targetObject.parent;
+                }
+                
+                if (targetObject.userData.isDraggable) {
+                    this.isDragging = true;
+                    this.dragObject = targetObject;
+                    this.controls.enabled = false; // Disable orbit controls while dragging
+                    
+                    // Calculate drag plane (horizontal plane at object's Y position)
+                    const objectY = this.dragObject.position.y;
+                    this.dragPlane.setFromNormalAndCoplanarPoint(
+                        new THREE.Vector3(0, 1, 0),
+                        new THREE.Vector3(0, objectY, 0)
+                    );
+                    
+                    // Calculate offset from intersection point to object center
+                    const intersection = new THREE.Vector3();
+                    this.raycaster.ray.intersectPlane(this.dragPlane, intersection);
+                    this.dragOffset.subVectors(this.dragObject.position, intersection);
+                    
+                    // Visual feedback - slightly lift the object
+                    this.dragObject.position.y += 2;
+                    
+                    this.renderer.domElement.style.cursor = 'grabbing';
+                }
+            }
+        },
+
+        onMouseMove(event) {
+            this.updateMousePosition(event);
+            
+            if (this.isDragging && this.dragObject) {
+                // Cast ray and find intersection with drag plane
+                this.raycaster.setFromCamera(this.mouse, this.camera);
+                const intersection = new THREE.Vector3();
+                
+                if (this.raycaster.ray.intersectPlane(this.dragPlane, intersection)) {
+                    // Add offset to get the desired position
+                    const newPosition = intersection.add(this.dragOffset);
+                    
+                    // Constrain to room boundaries
+                    newPosition.x = Math.max(this.roomBounds.minX, Math.min(this.roomBounds.maxX, newPosition.x));
+                    newPosition.z = Math.max(this.roomBounds.minZ, Math.min(this.roomBounds.maxZ, newPosition.z));
+                    
+                    // Update object position
+                    this.dragObject.position.x = newPosition.x;
+                    this.dragObject.position.z = newPosition.z;
+                }
+            } else {
+                // Check if hovering over draggable object for cursor feedback
+                this.raycaster.setFromCamera(this.mouse, this.camera);
+                const intersects = this.raycaster.intersectObjects(this.draggableObjects, true);
+                
+                if (intersects.length > 0) {
+                    let targetObject = intersects[0].object;
+                    while (targetObject.parent && !targetObject.userData.isDraggable) {
+                        targetObject = targetObject.parent;
+                    }
+                    
+                    if (targetObject.userData.isDraggable) {
+                        this.renderer.domElement.style.cursor = 'grab';
+                    }
+                } else {
+                    this.renderer.domElement.style.cursor = 'default';
+                }
+            }
+        },
+
+        onMouseUp() {
+            if (this.isDragging && this.dragObject) {
+                // Lower the object back to its original Y position
+                this.dragObject.position.y -= 2;
+                
+                this.isDragging = false;
+                this.dragObject = null;
+                this.controls.enabled = true; // Re-enable orbit controls
+                
+                this.renderer.domElement.style.cursor = 'default';
+            }
+        },
+
+        updateMousePosition(event) {
+            const rect = this.renderer.domElement.getBoundingClientRect();
+            this.mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+            this.mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
         }
     }
 }
@@ -259,5 +399,6 @@ export default {
 .three-container {
     padding: 0;
     margin: 0;
+    cursor: default;
 }
 </style>
