@@ -1,5 +1,5 @@
 <template>
-    <div ref="threeContainer" class="three-container"></div>
+  <div ref="threeContainer" class="three-container"></div>
 </template>
 
 <script>
@@ -8,397 +8,352 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 
 export default {
-    name: 'ThreeScene',
-    data() {
-        return {
-            draggableObjects: [],
-            isDragging: false,
-            dragObject: null,
-            mouse: new THREE.Vector2(),
-            raycaster: new THREE.Raycaster(),
-            dragPlane: new THREE.Plane(),
-            dragOffset: new THREE.Vector3(),
-            roomBounds: {
-                minX: -95, maxX: 95,
-                minZ: -95, maxZ: 95,
-                minY: 50, maxY: 100
+  name: 'ThreeScene',
+  data() {
+    return {
+      draggableObjects: [],   // top-level draggable models
+      pickTargets: [],        // simple invisible boxes for raycast picking
+      isDragging: false,
+      dragObject: null,
+
+      mouse: new THREE.Vector2(),
+      raycaster: new THREE.Raycaster(),
+      dragPlane: new THREE.Plane(),
+      dragOffset: new THREE.Vector3(),
+
+      roomBounds: { minX: -95, maxX: 95, minZ: -95, maxZ: 95, minY: 50, maxY: 100 },
+      walls: [],
+      wallBoxes: [],
+
+      // temps / caches
+      tmpVec3: new THREE.Vector3(),
+      cameraPos: new THREE.Vector3(),
+      cameraDir: new THREE.Vector3(),
+      wallPos:   new THREE.Vector3(),
+      camToWall: new THREE.Vector3(),
+      lastCamMatrix: new THREE.Matrix4(),
+    };
+  },
+  mounted() {
+    this.initThreeJS();
+  },
+  methods: {
+    initThreeJS() {
+      // Scene / camera / renderer
+      const scene = new THREE.Scene();
+      const camera = new THREE.PerspectiveCamera(80, window.innerWidth / window.innerHeight, 0.1, 1000);
+
+      const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+      // No shadow map (faster). If you need shadows later, enable and tune.
+    //    renderer.shadowMap.enabled = true;
+      this.$refs.threeContainer.appendChild(renderer.domElement);
+      scene.background = new THREE.Color(0xeeeeee);
+
+      this.scene = scene;
+      this.camera = camera;
+      this.renderer = renderer;
+
+      // Floor (cheaper material)
+      const floor = new THREE.Mesh(
+        new THREE.PlaneGeometry(200, 200),
+        new THREE.MeshLambertMaterial({ color: 0x000000, side: THREE.DoubleSide })
+      );
+      floor.rotation.x = -Math.PI / 2;
+      floor.position.set(0, 0, 0);
+      floor.name = 'floor';
+      scene.add(floor);
+
+      // Walls (cheaper material)
+      const wallMat = new THREE.MeshLambertMaterial({ color: 0xffffff });
+      const wall1 = new THREE.Mesh(new THREE.BoxGeometry(200, 100, 1), wallMat.clone());
+      wall1.position.set(0, 50, -100); wall1.name = 'wall'; scene.add(wall1);
+
+      const wall2 = new THREE.Mesh(new THREE.BoxGeometry(200, 100, 1), wallMat.clone());
+      wall2.rotation.y = Math.PI / 2; wall2.position.set(100, 50, 0); wall2.name = 'wall'; scene.add(wall2);
+
+      const wall3 = new THREE.Mesh(new THREE.BoxGeometry(200, 100, 1), wallMat.clone());
+      wall3.rotation.y = Math.PI / 2; wall3.position.set(-100, 50, 0); wall3.name = 'wall'; scene.add(wall3);
+
+      const wall4 = new THREE.Mesh(new THREE.BoxGeometry(200, 100, 1), wallMat.clone());
+      wall4.position.set(0, 50, 100); wall4.name = 'wall'; scene.add(wall4);
+
+      this.walls = [
+        { mesh: wall1, normal: new THREE.Vector3(0, 0, 1) },
+        { mesh: wall2, normal: new THREE.Vector3(-1, 0, 0) },
+        { mesh: wall3, normal: new THREE.Vector3(1, 0, 0) },
+        { mesh: wall4, normal: new THREE.Vector3(0, 0, -1) }
+      ];
+      // Precompute static wall boxes once
+      this.wallBoxes = this.walls.map(({ mesh }) => new THREE.Box3().setFromObject(mesh));
+
+      // Lights
+      scene.add(new THREE.AmbientLight(0xffffff, 1));
+      const fillLight = new THREE.DirectionalLight(0xffffff, 1);
+      fillLight.position.set(20, 100, 20);
+      scene.add(fillLight);
+      this.fillLight = fillLight;
+
+      // Camera & controls
+      camera.position.set(0, 120, 180);
+      camera.lookAt(0, 50, 0);
+
+      const controls = new OrbitControls(camera, renderer.domElement);
+      controls.enableDamping = true;          // still smooth, but we render on demand
+      controls.dampingFactor = 0.15;
+      controls.screenSpacePanning = false;
+      controls.maxPolarAngle = Math.PI / 2;
+      controls.minDistance = 200;
+      controls.maxDistance = 480;
+      this.controls = controls;
+
+      // Render-on-demand: render when controls change
+      controls.addEventListener('change', this.render);
+
+      // Loader
+      const gltfLoader = new GLTFLoader();
+
+      const loadModel = (path, position, targetSize, rotation, name) => {
+        gltfLoader.load(path, (gltf) => {
+          const model = gltf.scene;
+
+          // size & scale
+          const box = new THREE.Box3().setFromObject(model);
+          const size = box.getSize(new THREE.Vector3());
+          const s = Math.min(targetSize.x / size.x, targetSize.y / size.y, targetSize.z / size.z);
+
+          model.scale.set(s, s, s);
+          model.position.set(position.x, position.y, position.z);
+          model.rotation.set(rotation.x, rotation.y, rotation.z);
+
+          // center to given position
+          const scaledBox = new THREE.Box3().setFromObject(model);
+          const center = scaledBox.getCenter(new THREE.Vector3());
+          model.position.sub(center).add(new THREE.Vector3(position.x, position.y, position.z));
+
+          model.name = name;
+          model.userData.isDraggable = true;
+          model.userData.originalPosition = model.position.clone();
+
+          // Optional: don’t set cast/receiveShadow unless you enable renderer.shadowMap
+          model.traverse((child) => {
+            if (child.isMesh) {
+              child.userData.parent = model;
+              child.frustumCulled = true;
             }
-        }
+          });
+
+          // Cache a local-space bounding box and a reusable worldBox
+          model.updateWorldMatrix(true, true);
+          const worldBox = new THREE.Box3().setFromObject(model);
+          const inv = new THREE.Matrix4().copy(model.matrixWorld).invert();
+          model.userData.localBox = worldBox.clone().applyMatrix4(inv); // local-space
+          model.userData.worldBox = new THREE.Box3();                   // holder
+
+          // Build a simple invisible pick proxy (single box) for raycasting
+          const lb = model.userData.localBox; // min/max in local space
+          const sizeL = new THREE.Vector3().subVectors(lb.max, lb.min);
+          const centerL = new THREE.Vector3().addVectors(lb.min, lb.max).multiplyScalar(0.5);
+
+          const pickGeo = new THREE.BoxGeometry(sizeL.x, sizeL.y, sizeL.z);
+          const pickMat = new THREE.MeshBasicMaterial({ visible: false });
+          const pickProxy = new THREE.Mesh(pickGeo, pickMat);
+          pickProxy.position.copy(centerL);
+          pickProxy.name = `${name}_pickProxy`;
+
+          // Parent the pick proxy to the model so it follows transforms
+          model.add(pickProxy);
+
+          this.scene.add(model);
+          this.draggableObjects.push(model);
+          this.pickTargets.push(pickProxy);
+
+          this.render();
+        }, undefined, (e) => console.error('Error loading model:', e));
+      };
+
+      // Load your models
+      loadModel('models/bath.glb',   { x:  50, y: 25, z: -70 }, { x: 150, y:  50, z:  70 }, { x: 0, y: 0,             z: 0 }, 'bath');
+      loadModel('models/door.glb',   { x:  80, y: 37, z:  98 }, { x:   5, y: 200, z: 100 }, { x: 0, y: Math.PI / 2,  z: 0 }, 'door');
+      loadModel('models/mirror.glb', { x: 100, y: 60, z:   0 }, { x:  60, y:  80, z:  45 }, { x: 0, y: Math.PI / 2,  z: 0 }, 'mirror');
+      loadModel('models/toilet.glb', { x:  -50, y: 10, z: -60 }, { x:  40, y:  70, z:  60 }, { x: 0, y: Math.PI / 70, z: 0 }, 'toilet');
+
+      // Events
+      this.addDragListeners();
+
+      // First render
+      this.render();
+
+      // Resize
+      window.addEventListener('resize', () => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        this.render();
+      });
     },
-    mounted() {
-        this.initThreeJS();
-    },
-    methods: {
-        initThreeJS() {
-            // Basic setup            
-            const scene = new THREE.Scene();
-            const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-            const renderer = new THREE.WebGLRenderer({ antialias: true });
-            renderer.setSize(window.innerWidth, window.innerHeight);
-            this.$refs.threeContainer.appendChild(renderer.domElement);
-            scene.background = new THREE.Color(0xeeeeee);
 
-            // Store references for drag functionality
-            this.scene = scene;
-            this.camera = camera;
-            this.renderer = renderer;
+    // ---------- Render-on-demand ----------
+    render() {
+      // update wall visibility if camera changed
+      const cam = this.camera;
+      if (!this.lastCamMatrix.equals(cam.matrixWorld)) {
+        this.lastCamMatrix.copy(cam.matrixWorld);
 
-            // Floor
-            const floorGeometry = new THREE.PlaneGeometry(200, 200);
-            const floorMaterial = new THREE.MeshStandardMaterial({
-                color: 0x87CEEB,
-                side: THREE.DoubleSide,
-                roughness: 0.5,
-                metalness: 0.2
-            });
-            const floor = new THREE.Mesh(floorGeometry, floorMaterial);
-            floor.rotation.x = -Math.PI / 2;
-            floor.position.set(0, 0, 0);
-            floor.name = 'floor'; // Name it so we can identify it
-            scene.add(floor);
+        cam.getWorldPosition(this.cameraPos);
+        cam.getWorldDirection(this.cameraDir);
 
-            // Walls
-            const wallMaterialSettings = {
-                side: THREE.DoubleSide,
-                roughness: 0.7,
-                metalness: 0.1
-            };
-            
-            const wall1 = new THREE.Mesh(
-                new THREE.BoxGeometry(200, 100, 4), 
-                new THREE.MeshStandardMaterial({ color: 0xffffff, ...wallMaterialSettings })
-            );
-            wall1.position.set(0, 50, -100);
-            wall1.name = 'wall';
-            scene.add(wall1);
-
-            const wall2 = new THREE.Mesh(
-                new THREE.BoxGeometry(200, 100, 4), 
-                new THREE.MeshStandardMaterial({ color: 0xffffff, ...wallMaterialSettings })
-            );
-            wall2.rotation.y = Math.PI / 2;
-            wall2.position.set(100, 50, 0);
-            wall2.name = 'wall';
-            scene.add(wall2);
-
-            const wall3 = new THREE.Mesh(
-                new THREE.BoxGeometry(200, 100, 4), 
-                new THREE.MeshStandardMaterial({ color: 0xffffff, ...wallMaterialSettings })
-            );
-            wall3.rotation.y = Math.PI / 2;
-            wall3.position.set(-100, 50, 0);
-            wall3.name = 'wall';
-            scene.add(wall3);
-
-            const wall4 = new THREE.Mesh(
-                new THREE.BoxGeometry(200, 100, 4), 
-                new THREE.MeshStandardMaterial({ color: 0xffffff, ...wallMaterialSettings })
-            );
-            wall4.position.set(0, 50, 100);
-            wall4.name = 'wall';
-            scene.add(wall4);
-
-            const walls = [
-                { mesh: wall1, normal: new THREE.Vector3(0, 0, 1) },     // Back wall 
-                { mesh: wall2, normal: new THREE.Vector3(-1, 0, 0) },    // Right wall
-                { mesh: wall3, normal: new THREE.Vector3(1, 0, 0) },     // Left wall
-                { mesh: wall4, normal: new THREE.Vector3(0, 0, -1) }     // Front wall
-            ];
-
-            this.walls = walls;
-
-            // Lighting
-            const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
-            scene.add(ambientLight);
-
-            const fillLight = new THREE.DirectionalLight(0xffffff, 1);
-            fillLight.position.set(20, 100, 20);
-            scene.add(fillLight);
-            this.fillLight = fillLight;
-
-            // Camera
-            camera.position.set(0, 100, 100);
-            camera.lookAt(0, 50, 0);
-
-            // Controls
-            const controls = new OrbitControls(camera, renderer.domElement);
-            controls.enableDamping = true;
-            controls.dampingFactor = 0.25;
-            controls.screenSpacePanning = false;
-            controls.maxPolarAngle = Math.PI/2;
-            controls.minDistance = 260;
-            controls.maxDistance = 500;
-            this.controls = controls;
-
-            // Model Loading with automatic scaling
-            const gltfLoader = new GLTFLoader();
-            
-            const loadModel = (path, position, targetSize, rotation, name, callback) => {
-                gltfLoader.load(path, (gltf) => {
-                    const model = gltf.scene;
-                    
-                    // Calculate bounding box to get actual model size
-                    const box = new THREE.Box3().setFromObject(model);
-                    const currentSize = box.getSize(new THREE.Vector3());
-                    
-                    // Calculate scale factor based on target size
-                    const scaleX = targetSize.x / currentSize.x;
-                    const scaleY = targetSize.y / currentSize.y;
-                    const scaleZ = targetSize.z / currentSize.z;
-                     
-                    // Use uniform scaling (smallest scale to maintain proportions)
-                    const uniformScale = Math.min(scaleX, scaleY, scaleZ);
-                    
-                    model.scale.set(uniformScale, uniformScale, uniformScale);
-                    model.position.set(position.x, position.y, position.z);
-                    model.rotation.set(rotation.x, rotation.y, rotation.z);
-                    
-                    // Center the model at its position
-                    const scaledBox = new THREE.Box3().setFromObject(model);
-                    const center = scaledBox.getCenter(new THREE.Vector3());
-                    model.position.sub(center);
-                    model.position.add(new THREE.Vector3(position.x, position.y, position.z));
-                    
-                    // Set name and make draggable
-                    model.name = name;
-                    model.userData.isDraggable = true;
-                    model.userData.originalPosition = model.position.clone();
-                    
-                    model.traverse((child) => {
-                        if (child.isMesh) {
-                            child.castShadow = true;
-                            child.receiveShadow = true;
-                            child.userData.parent = model; // Reference to parent model
-                        }
-                    });
-                    
-                    scene.add(model);
-                    
-                    // Add to draggable objects
-                    this.draggableObjects.push(model);
-                    
-                    if (callback) callback(model);
-                    
-                    console.log(`Loaded ${path}:`, 
-                        `Original size: ${currentSize.x.toFixed(2)} x ${currentSize.y.toFixed(2)} x ${currentSize.z.toFixed(2)}, 
-                         Scale factor: ${uniformScale.toFixed(2)}`);
-                         
-                }, undefined, (error) => {
-                    console.error('Error loading model:', error);
-                });
-            };  
-
-            // Load draggable models
-            loadModel('models/bath.glb', 
-                { x: 50, y: 25, z: -70 }, 
-                { x: 150, y: 50, z: 70 }, 
-                { x: 0, y: 0, z: 0 },
-                'bath'
-            );
-
-            loadModel('models/door.glb', 
-                { x: 80, y: 37, z: 98 }, 
-                { x: 5, y: 200, z: 100 }, 
-                { x: 0, y: Math.PI / 2, z: 0 },
-                'door'
-            );
-
-            loadModel('models/mirror.glb', 
-                { x: -100, y: 60, z: 0 }, 
-                { x: -60, y: 80, z: 45 }, 
-                { x: 0, y: Math.PI/2, z: 0 },
-                'mirror'
-            );
-
-            loadModel('models/toilet.glb', 
-                { x: -50, y: 10, z: -60 }, 
-                { x: 40, y: 70, z: 60 }, 
-                { x: 0, y: Math.PI / 70, z: 0 },
-                'toilet'
-            );
-
-            // Add mouse event listeners for dragging
-            this.addDragListeners();
-
-            // Animation
-            const animate = () => {
-                requestAnimationFrame(animate);
-                
-                const cameraPosition = new THREE.Vector3();
-                camera.getWorldPosition(cameraPosition);  
-
-                const cameraDirection = new THREE.Vector3();
-                camera.getWorldDirection(cameraDirection);
-
-                this.walls.forEach(({ mesh, normal }) => {
-                    const wallPosition = new THREE.Vector3();
-                    mesh.getWorldPosition(wallPosition);
-
-                    // Direction from camera to wall
-                    const cameraToWall = new THREE.Vector3()
-                        .subVectors(wallPosition, cameraPosition)
-                        .normalize();
-
-                    // If positive, wall is facing towards camera
-                    const dot = cameraToWall.dot(normal);
-
-                    mesh.visible = dot <= 0.1; // Small threshold for better control
-                });
-                
-                this.fillLight.position.copy(camera.position);
-                this.fillLight.position.y += 50; // Keep light above camera
-                
-                if (!this.isDragging) {
-                    this.controls.update();
-                }
-                
-                renderer.render(scene, camera);
-            };
-
-            animate();
-
-            // Window resize handler
-            window.addEventListener('resize', () => {
-                camera.aspect = window.innerWidth / window.innerHeight;
-                camera.updateProjectionMatrix();
-                renderer.setSize(window.innerWidth, window.innerHeight);
-            });
-        },
-
-        addDragListeners() {
-            const container = this.renderer.domElement;
-            
-            // Mouse down event
-            container.addEventListener('mousedown', (event) => {
-                event.preventDefault();
-                this.onMouseDown(event);
-            });
-
-            // Mouse move event
-            container.addEventListener('mousemove', (event) => {
-                event.preventDefault();
-                this.onMouseMove(event);
-            });
-
-            // Mouse up event
-            container.addEventListener('mouseup', (event) => {
-                event.preventDefault();
-                this.onMouseUp(event);
-            });
-
-            // Prevent context menu
-            container.addEventListener('contextmenu', (event) => {
-                event.preventDefault();
-            });
-        },
-
-        onMouseDown(event) {
-            this.updateMousePosition(event);
-            
-            // Cast ray from camera through mouse position
-            this.raycaster.setFromCamera(this.mouse, this.camera);
-            
-            // Check for intersections with draggable objects
-            const intersects = this.raycaster.intersectObjects(this.draggableObjects, true);
-            
-            if (intersects.length > 0) {
-                // Find the parent draggable object
-                let targetObject = intersects[0].object;
-                while (targetObject.parent && !targetObject.userData.isDraggable) {
-                    targetObject = targetObject.parent;
-                }
-                
-                if (targetObject.userData.isDraggable) {
-                    this.isDragging = true;
-                    this.dragObject = targetObject;
-                    this.controls.enabled = false; // Disable orbit controls while dragging
-                    
-                    // Calculate drag plane (horizontal plane at object's Y position)
-                    const objectY = this.dragObject.position.y;
-                    this.dragPlane.setFromNormalAndCoplanarPoint(
-                        new THREE.Vector3(0, 1, 0),
-                        new THREE.Vector3(0, objectY, 0)
-                    );
-                    
-                    // Calculate offset from intersection point to object center
-                    const intersection = new THREE.Vector3();
-                    this.raycaster.ray.intersectPlane(this.dragPlane, intersection);
-                    this.dragOffset.subVectors(this.dragObject.position, intersection);
-                    
-                    // Visual feedback - slightly lift the object
-                    this.dragObject.position.y += 2;
-                    
-                    this.renderer.domElement.style.cursor = 'grabbing';
-                }
-            }
-        },
-
-        onMouseMove(event) {
-            this.updateMousePosition(event);
-            
-            if (this.isDragging && this.dragObject) {
-                // Cast ray and find intersection with drag plane
-                this.raycaster.setFromCamera(this.mouse, this.camera);
-                const intersection = new THREE.Vector3();
-                
-                if (this.raycaster.ray.intersectPlane(this.dragPlane, intersection)) {
-                    // Add offset to get the desired position
-                    const newPosition = intersection.add(this.dragOffset);
-                    
-                    // Constrain to room boundaries
-                    newPosition.x = Math.max(this.roomBounds.minX, Math.min(this.roomBounds.maxX, newPosition.x));
-                    newPosition.z = Math.max(this.roomBounds.minZ, Math.min(this.roomBounds.maxZ, newPosition.z));
-                    
-                    // Update object position
-                    this.dragObject.position.x = newPosition.x;
-                    this.dragObject.position.z = newPosition.z;
-                }
-            } else {
-                // Check if hovering over draggable object for cursor feedback
-                this.raycaster.setFromCamera(this.mouse, this.camera);
-                const intersects = this.raycaster.intersectObjects(this.draggableObjects, true);
-                
-                if (intersects.length > 0) {
-                    let targetObject = intersects[0].object;
-                    while (targetObject.parent && !targetObject.userData.isDraggable) {
-                        targetObject = targetObject.parent;
-                    }
-                    
-                    if (targetObject.userData.isDraggable) {
-                        this.renderer.domElement.style.cursor = 'grab';
-                    }
-                } else {
-                    this.renderer.domElement.style.cursor = 'default';
-                }
-            }
-        },
-
-        onMouseUp() {
-            if (this.isDragging && this.dragObject) {
-                // Lower the object back to its original Y position
-                this.dragObject.position.y -= 2;
-                
-                this.isDragging = false;
-                this.dragObject = null;
-                this.controls.enabled = true; // Re-enable orbit controls
-                
-                this.renderer.domElement.style.cursor = 'default';
-            }
-        },
-
-        updateMousePosition(event) {
-            const rect = this.renderer.domElement.getBoundingClientRect();
-            this.mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
-            this.mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+        for (const { mesh, normal } of this.walls) {
+          mesh.getWorldPosition(this.wallPos);
+          this.camToWall.subVectors(this.wallPos, this.cameraPos).normalize();
+          mesh.visible = this.camToWall.dot(normal) <= 0.1;
         }
-    }
-}
+      }
+
+      // keep light following camera (cheap)
+      this.fillLight.position.copy(this.camera.position).add(new THREE.Vector3(0, 50, 0));
+
+      this.renderer.render(this.scene, this.camera);
+    },
+
+    // ---------- Events (pointer) ----------
+    addDragListeners() {
+      const el = this.renderer.domElement;
+      el.addEventListener('pointerdown', this.onPointerDown);
+      el.addEventListener('pointermove', this.onPointerMove);
+      el.addEventListener('pointerup',   this.onPointerUp);
+      el.addEventListener('contextmenu', (e) => e.preventDefault());
+    },
+
+    onPointerDown(event) {
+      this.updateMousePosition(event);
+      this.raycaster.setFromCamera(this.mouse, this.camera);
+
+      // Raycast only against simple pick proxies (fast)
+      const hits = this.raycaster.intersectObjects(this.pickTargets, false);
+      if (!hits.length) return;
+
+      // Draggable root is the proxy's parent (the model)
+      let target = hits[0].object.parent;
+      if (!target || !target.userData.isDraggable) return;
+
+      this.isDragging = true;
+      this.dragObject = target;
+      this.controls.enabled = false;
+
+      // Drag plane @ object's current Y
+      const y = this.dragObject.position.y;
+      this.dragPlane.setFromNormalAndCoplanarPoint(
+        new THREE.Vector3(0, 1, 0),
+        new THREE.Vector3(0, y, 0)
+      );
+
+      // Offset (object center - hit point)
+      const intersection = new THREE.Vector3();
+      this.raycaster.ray.intersectPlane(this.dragPlane, intersection);
+      this.dragOffset.subVectors(this.dragObject.position, intersection);
+
+      this.renderer.domElement.style.cursor = 'grabbing';
+      this.render();
+    },
+
+    onPointerMove(event) {
+      this.updateMousePosition(event);
+
+      if (this.isDragging && this.dragObject) {
+        this.raycaster.setFromCamera(this.mouse, this.camera);
+
+        const intersection = this.tmpVec3;
+        if (this.raycaster.ray.intersectPlane(this.dragPlane, intersection)) {
+          const desiredX = intersection.x + this.dragOffset.x;
+          const desiredZ = intersection.z + this.dragOffset.z;
+
+          const clampedX = Math.max(this.roomBounds.minX, Math.min(this.roomBounds.maxX, desiredX));
+          const clampedZ = Math.max(this.roomBounds.minZ, Math.min(this.roomBounds.maxZ, desiredZ));
+
+          const obj = this.dragObject;
+          const oldX = obj.position.x, oldZ = obj.position.z;
+
+          obj.position.x = clampedX;
+          obj.position.z = clampedZ;
+
+          if (this.intersectsAny(obj)) {
+            // revert and nudge
+            obj.position.x = oldX;
+            obj.position.z = oldZ;
+
+            const dx = clampedX - oldX, dz = clampedZ - oldZ;
+            const len = Math.hypot(dx, dz);
+            if (len > 1e-6) {
+              const eps = 0.5;
+              const nx = oldX + (dx / len) * Math.max(0, len - eps);
+              const nz = oldZ + (dz / len) * Math.max(0, len - eps);
+              obj.position.x = nx;
+              obj.position.z = nz;
+              if (this.intersectsAny(obj)) {
+                obj.position.x = oldX;
+                obj.position.z = oldZ;
+              }
+            }
+          }
+          this.render(); // draw only when something actually moved
+        }
+      } else {
+        // Hover feedback (cheap because we raycast against pick proxies)
+        this.raycaster.setFromCamera(this.mouse, this.camera);
+        const hits = this.raycaster.intersectObjects(this.pickTargets, false);
+        this.renderer.domElement.style.cursor = hits.length ? 'grab' : 'default';
+        // No need to render on hover unless you change visuals
+      }
+    },
+
+    onPointerUp() {
+      if (!this.isDragging) return;
+      this.isDragging = false;
+      this.dragObject = null;
+      this.controls.enabled = true;
+      this.renderer.domElement.style.cursor = 'default';
+      this.render();
+    },
+
+    // ---------- Helpers ----------
+    updateMousePosition(event) {
+      const rect = this.renderer.domElement.getBoundingClientRect();
+      this.mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+      this.mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+    },
+
+    // Fast world box using cached local box (no traversal)
+    getWorldBoxFast(obj) {
+      obj.updateWorldMatrix(true, false);
+      return obj.userData.worldBox.copy(obj.userData.localBox).applyMatrix4(obj.matrixWorld);
+    },
+
+    intersectsAny(targetObj) {
+      const targetBox = this.getWorldBoxFast(targetObj);
+
+      // Other draggables (if they don't move, you could precompute their world boxes once)
+      for (const other of this.draggableObjects) {
+        if (other === targetObj) continue;
+        const otherBox = this.getWorldBoxFast(other);
+        if (targetBox.intersectsBox(otherBox)) return true;
+      }
+
+      // Static walls
+      for (const wallBox of this.wallBoxes) {
+        if (targetBox.intersectsBox(wallBox)) return true;
+      }
+      return false;
+    },
+  }
+};
 </script>
 
 <style scoped>
 .three-container {
-    padding: 0;
-    margin: 0;
-    cursor: default;
+  padding: 0;
+  margin: 0;
+  cursor: default;
 }
 </style>
